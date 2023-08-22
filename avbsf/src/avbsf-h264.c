@@ -1,9 +1,11 @@
 #include "avbsf.h"
 #include "cbuffer.h"
 #include "mpeg4-avc.h"
+#include "avdtsinfer.h"
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#include <errno.h>
 
 #define H264_NAL_IDR		5 // Coded slice of an IDR picture
 #define H264_NAL_SPS		7 // Sequence parameter set
@@ -20,15 +22,7 @@ struct h264bsf_t
 	int vcl;
 	int64_t pts;
 	int64_t dts;
-	int64_t max_dts; // last I/P frame dts
-
-	// TODO: move average window
-	struct
-	{
-		int interval; // 1/fps
-		int64_t first;
-		int count;
-	} fps;
+	struct avdtsinfer_t infer;
 
 	uint8_t extra[4 * 1024];
 	int extra_bytes;
@@ -56,9 +50,9 @@ static void* h264bsf_create(const uint8_t* extra, int bytes, avbsf_onpacket onpa
 	bsf = calloc(1, sizeof(*bsf));
 	if (!bsf) return NULL;
 
+	avdtsinfer_reset(&bsf->infer);
 	cbuffer_init(&bsf->ptr);
 	bsf->sps_pps_flag = 0;
-	bsf->fps.interval = 40;
 	
 	if (bytes > 5 && bytes <= sizeof(bsf->extra) && 0x00 == extra[0] && 0x00 == extra[1] && (0x01 == extra[2] || (0x00 == extra[2] && 0x01 == extra[3])))
 	{
@@ -84,23 +78,15 @@ static int h264bsf_input(void* param, int64_t pts, int64_t dts, const uint8_t* n
 	struct h264bsf_t* bsf;
 	bsf = (struct h264bsf_t*)param;
 
+	if (bytes > 3 && 0x00 == nalu[0] && 0x00 == nalu[1] && (0x01 == nalu[2] || (0x00 == nalu[2] && 0x01 == nalu[3])))
+	{
+		nalu += 0x01 == nalu[2] ? 3 : 4;
+		bytes -= 0x01 == nalu[2] ? 3 : 4;
+	}
+
 	if (bsf->vcl && (dts != bsf->dts || 0 == bytes || h264_is_new_access_unit(nalu, bytes)))
 	{
-		// update fps
-		if (0 == bsf->fps.count)
-		{
-			bsf->fps.first = bsf->dts;
-		}
-		else if (++bsf->fps.count > 100 && bsf->dts > bsf->max_dts)
-		{
-			bsf->fps.interval = bsf->fps.interval * 3 / 4 + (int)((bsf->dts - bsf->fps.first) / (4 * bsf->fps.count));
-			bsf->fps.count = 0;
-		}
-
-		// RTP B-frame(s)
-		if (bsf->dts < bsf->max_dts)
-			bsf->dts = bsf->max_dts + bsf->fps.interval;
-		bsf->max_dts = bsf->dts;
+		bsf->dts = avdtsinfer_update(&bsf->infer, 1 == bsf->vcl ? 1 : 0, bsf->pts, pts);
 
 		r = bsf->onpacket(bsf->param, bsf->pts, bsf->dts, bsf->ptr.ptr, (int)bsf->ptr.len, 1==bsf->vcl ? 0x01 : 0);
 		bsf->ptr.len = 0;
@@ -110,6 +96,9 @@ static int h264bsf_input(void* param, int64_t pts, int64_t dts, const uint8_t* n
 			return r;
 	}
 	
+	if (bytes < 1)
+		return 0;
+
 	nalt = nalu[0] & 0x1f;
 	switch (nalt)
 	{
@@ -145,7 +134,7 @@ static int h264bsf_input(void* param, int64_t pts, int64_t dts, const uint8_t* n
 
 	if (cbuffer_append(&bsf->ptr, startcode, sizeof(startcode)) <= 0
 		|| cbuffer_append(&bsf->ptr, nalu, bytes) <= 0 )
-		return -1;
+		return -(__ERROR__ + ENOMEM);
 
 	bsf->pts = pts;
 	bsf->dts = dts;
@@ -155,9 +144,9 @@ static int h264bsf_input(void* param, int64_t pts, int64_t dts, const uint8_t* n
 struct avbsf_t* avbsf_h264(void)
 {
 	static struct avbsf_t bsf = {
-		.create = h264bsf_create,
-		.destroy = h264bsf_destroy,
-		.input = h264bsf_input,
+		h264bsf_create,
+		h264bsf_destroy,
+		h264bsf_input,
 	};
 	return &bsf;
 }

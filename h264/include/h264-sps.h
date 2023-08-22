@@ -1,6 +1,7 @@
 #ifndef _h264_sps_h_
 #define _h264_sps_h_
 
+#include "h264-vui.h"
 #include <inttypes.h>
 #include <stdint.h>
 #include <stddef.h>
@@ -36,7 +37,7 @@ struct h264_sps_t
 	int32_t offset_for_non_ref_pic;
 	int32_t offset_for_top_to_bottom_field;
 	uint8_t num_ref_frames_in_pic_order_cnt_cycle; // [0, 255]
-	int32_t *offset_for_ref_frame;
+	int32_t offset_for_ref_frame[64];
 	uint32_t max_num_ref_frames; // [0, MaxDpbFrames]
 	uint8_t	gaps_in_frame_num_value_allowed_flag; // bool
 	uint32_t pic_width_in_mbs_minus1;
@@ -54,6 +55,7 @@ struct h264_sps_t
 	} frame_cropping;
 
 	uint8_t vui_parameters_present_flag; // bool
+	struct h264_vui_t vui;
 };
 
 int h264_sps_parse(const void* data, uint32_t bytes, struct h264_sps_t* sps);

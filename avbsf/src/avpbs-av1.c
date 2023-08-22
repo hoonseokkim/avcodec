@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#include <errno.h>
 
 struct avpbs_av1_t
 {
@@ -30,7 +31,7 @@ static int avpbs_av1_create_stream(struct avpbs_av1_t* bs, int stream, const uin
 	avstream_release(bs->stream);
 	bs->stream = avstream_alloc(bytes);
 	if (!bs->stream)
-		return -1;
+		return -(__ERROR__ + ENOMEM);
 
 	bs->stream->stream = stream;
 	bs->stream->codecid = AVCODEC_VIDEO_AV1;
@@ -44,7 +45,7 @@ static void* avpbs_av1_create(int stream, AVPACKET_CODEC_ID codec, const uint8_t
 	bs = calloc(1, sizeof(*bs));
 	if (!bs) return NULL;
 
-	if (aom_av1_codec_configuration_record_load(extra, bytes, &bs->av1) < 0)
+	if (bytes > 0 && aom_av1_codec_configuration_record_load(extra, bytes, &bs->av1) < 0)
 	{
 		avpbs_av1_destroy((void**)&bs);
 		return NULL;
@@ -65,7 +66,7 @@ static int avpbs_av1_input(void* param, int64_t pts, int64_t dts, const uint8_t*
 
 	bs = (struct avpbs_av1_t*)param;
 	pkt = avpacket_alloc(bytes);
-	if (!pkt) return -1;
+	if (!pkt) return -(__ERROR__ + ENOMEM);
 
 	// TODO: stream width/height
 
@@ -84,9 +85,9 @@ static int avpbs_av1_input(void* param, int64_t pts, int64_t dts, const uint8_t*
 struct avpbs_t* avpbs_av1(void)
 {
 	static struct avpbs_t bs = {
-		.destroy = avpbs_av1_destroy,
-		.create = avpbs_av1_create,
-		.input = avpbs_av1_input,
+		avpbs_av1_create,
+		avpbs_av1_destroy,
+		avpbs_av1_input,
 	};
 	return &bs;
 }

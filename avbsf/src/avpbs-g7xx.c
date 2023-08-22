@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#include <errno.h>
 
 // g711/g726/729
 struct avpbs_g7xx_t
@@ -65,7 +66,7 @@ static int avpbs_g7xx_input(void* param, int64_t pts, int64_t dts, const uint8_t
 
 	bs = (struct avpbs_g7xx_t*)param;
 	pkt = avpacket_alloc(bytes);
-	if (!pkt) return -1;
+	if (!pkt) return -(__ERROR__ + ENOMEM);
 
 	memcpy(pkt->data, data, bytes);
 	pkt->pts = pts;
@@ -82,9 +83,9 @@ static int avpbs_g7xx_input(void* param, int64_t pts, int64_t dts, const uint8_t
 struct avpbs_t* avpbs_g7xx(void)
 {
 	static struct avpbs_t bs = {
-		.destroy = avpbs_g7xx_destroy,
-		.create = avpbs_g7xx_create,
-		.input = avpbs_g7xx_input,
+		avpbs_g7xx_create,
+		avpbs_g7xx_destroy,
+		avpbs_g7xx_input,
 	};
 	return &bs;
 }

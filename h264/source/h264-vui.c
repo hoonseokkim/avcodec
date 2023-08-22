@@ -10,11 +10,11 @@ int h264_vui(bitstream_t* stream, struct h264_vui_t* vui)
 	vui->aspect_ratio_info_present_flag = bitstream_read_bit(stream);
 	if (vui->aspect_ratio_info_present_flag)
 	{
-		int aspect_ratio_idc = bitstream_read_bits(stream, 8);
-		if (aspect_ratio_idc == H264_VUI_Extended_SAR)
+		vui->aspect_ratio_idc = bitstream_read_bits(stream, 8);
+		if (vui->aspect_ratio_idc == H264_VUI_Extended_SAR)
 		{
-			/*int sar_width =*/ bitstream_read_bits(stream, 16);
-			/*int sar_height =*/ bitstream_read_bits(stream, 16);
+			vui->sar_width = bitstream_read_bits(stream, 16);
+			vui->sar_height = bitstream_read_bits(stream, 16);
 		}
 	}
 
@@ -27,14 +27,14 @@ int h264_vui(bitstream_t* stream, struct h264_vui_t* vui)
 	vui->video_signal_type_present_flag = bitstream_read_bit(stream);
 	if (vui->video_signal_type_present_flag)
 	{
-		/*int video_format =*/ bitstream_read_bits(stream, 3);
-		/*int video_full_range_flag =*/ bitstream_read_bit(stream);
-		int colour_description_present_flag = bitstream_read_bit(stream);
+		vui->video_format = (unsigned int)bitstream_read_bits(stream, 3);
+		vui->video_full_range_flag = (unsigned int)bitstream_read_bit(stream);
+		int colour_description_present_flag = (unsigned int)bitstream_read_bit(stream);
 		if (colour_description_present_flag)
 		{
-			/*int colour_primaries =*/ bitstream_read_bits(stream, 8);
-			/*int transfer_characteristics =*/ bitstream_read_bits(stream, 8);
-			/*int matrix_coefficients =*/ bitstream_read_bits(stream, 8);
+			vui->colour_primaries = (unsigned int)bitstream_read_bits(stream, 8);
+			vui->transfer_characteristics = (unsigned int)bitstream_read_bits(stream, 8);
+			vui->matrix_coefficients = (unsigned int)bitstream_read_bits(stream, 8);
 		}
 	}
 
@@ -48,25 +48,23 @@ int h264_vui(bitstream_t* stream, struct h264_vui_t* vui)
 	vui->timing_info_present_flag = bitstream_read_bit(stream);
 	if (vui->timing_info_present_flag)
 	{
-		/*int num_units_in_tick =*/ bitstream_read_bits(stream, 32);
-		/*int time_scale =*/ bitstream_read_bits(stream, 32);
-		/*int fixed_frame_rate_flag =*/ bitstream_read_bit(stream);
+		vui->num_units_in_tick = bitstream_read_bits(stream, 32);
+		vui->time_scale = bitstream_read_bits(stream, 32);
+		vui->fixed_frame_rate_flag = bitstream_read_bit(stream);
 	}
 
 	vui->nal_hrd_parameters_present_flag = bitstream_read_bit(stream);
 	if (vui->nal_hrd_parameters_present_flag)
 	{
-		struct h264_hrd_t hrd;
-		memset(&hrd, 0, sizeof(struct h264_hrd_t));
-		h264_hrd(stream, &hrd);
+		memset(&vui->nal_hrd, 0, sizeof(vui->nal_hrd));
+		h264_hrd(stream, &vui->nal_hrd);
 	}
 
 	vui->vcl_hrd_parameters_present_flag = bitstream_read_bit(stream);
 	if (vui->vcl_hrd_parameters_present_flag)
 	{
-		struct h264_hrd_t hrd;
-		memset(&hrd, 0, sizeof(struct h264_hrd_t));
-		h264_hrd(stream, &hrd);
+		memset(&vui->vcl_hrd, 0, sizeof(vui->vcl_hrd));
+		h264_hrd(stream, &vui->vcl_hrd);
 	}
 
 	if (vui->nal_hrd_parameters_present_flag || vui->vcl_hrd_parameters_present_flag)

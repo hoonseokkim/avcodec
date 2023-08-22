@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#include <errno.h>
 
 struct avpbs_vpx_t
 {
@@ -27,13 +28,15 @@ static int avpbs_vpx_destroy(void** pp)
 	return 0;
 }
 
-static int avpbs_vpx_create_stream(struct avpbs_vpx_t* bs, const uint8_t* extra, int bytes)
+static int avpbs_vpx_create_stream(struct avpbs_vpx_t* bs, int width, int height, const uint8_t* extra, int bytes)
 {
 	avstream_release(bs->stream);
 	bs->stream = avstream_alloc(bytes);
 	if (!bs->stream)
-		return -1;
+		return -(__ERROR__ + ENOMEM);
 
+	bs->stream->width = width;
+	bs->stream->height = height;
 	bs->stream->stream = bs->avs;
 	bs->stream->codecid = bs->codec;
 	memcpy(bs->stream->extra, extra, bytes);
@@ -49,7 +52,7 @@ static void* avpbs_vpx_create(int stream, AVPACKET_CODEC_ID codec, const uint8_t
 	bs->avs = stream;
 	bs->codec = codec;
 	if(webm_vpx_codec_configuration_record_load(extra, bytes, &bs->vpx) > 0)
-		avpbs_vpx_create_stream(bs, extra, bytes);
+		avpbs_vpx_create_stream(bs, 0, 0, extra, bytes);
 	
 	assert(AVCODEC_VIDEO_VP8 == codec || AVCODEC_VIDEO_VP9 == codec);
 	bs->onpacket = onpacket;
@@ -65,16 +68,18 @@ static int avpbs_vpx_input(void* param, int64_t pts, int64_t dts, const uint8_t*
 
 	bs = (struct avpbs_vpx_t*)param;
 	pkt = avpacket_alloc(bytes);
-	if (!pkt) return -1;
+	if (!pkt) return -(__ERROR__ + ENOMEM);
 
+	flags &= ~AVPACKET_FLAG_KEY;
 	if ( (AVCODEC_VIDEO_VP8 == bs->codec && webm_vpx_codec_configuration_record_from_vp8(&bs->vpx, &width, &height, data, bytes) >= 0)
 		|| (AVCODEC_VIDEO_VP9 == bs->codec && webm_vpx_codec_configuration_record_from_vp9(&bs->vpx, &width, &height, data, bytes) >= 0))
 	{
+		flags = AVPACKET_FLAG_KEY;
 		if (!bs->stream || bs->stream->width != width || bs->stream->height != height)
 		{
 			uint8_t extra[32];
 			r = webm_vpx_codec_configuration_record_save(&bs->vpx, extra, sizeof(extra));
-			avpbs_vpx_create_stream(bs, extra, r);
+			avpbs_vpx_create_stream(bs, width, height, extra, r);
 		}
 	}
 
@@ -93,9 +98,9 @@ static int avpbs_vpx_input(void* param, int64_t pts, int64_t dts, const uint8_t*
 struct avpbs_t* avpbs_vpx(void)
 {
 	static struct avpbs_t bs = {
-		.destroy = avpbs_vpx_destroy,
-		.create = avpbs_vpx_create,
-		.input = avpbs_vpx_input,
+		avpbs_vpx_create,
+		avpbs_vpx_destroy,
+		avpbs_vpx_input,
 	};
 	return &bs;
 }

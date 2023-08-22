@@ -4,8 +4,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#include <errno.h>
 
-#define H264_STARTCODE_PADDING 16  // 3->4 startcode
+#define H264_STARTCODE_PADDING 32  // 3->4 startcode
 
 struct avpbs_h264_t
 {
@@ -22,9 +23,9 @@ static int avpbs_h264_create_stream(struct avpbs_h264_t* bs)
 	struct h264_sps_t sps;
 
 	avstream_release(bs->stream);
-	bs->stream = avstream_alloc((int)(bs->avc.off + 8 * H264_STARTCODE_PADDING));
+	bs->stream = avstream_alloc((int)(bs->avc.off + (bs->avc.nb_sps + bs->avc.nb_pps) * 2 + 64));
 	if (!bs->stream)
-		return -1;
+		return -(__ERROR__ + ENOMEM);
 
 	memset(&sps, 0, sizeof(sps));
 	h264_sps_parse(bs->avc.sps[0].data, bs->avc.sps[0].bytes, &sps);
@@ -56,6 +57,10 @@ static void* avpbs_h264_create(int stream, AVPACKET_CODEC_ID codec, const uint8_
 	bs = calloc(1, sizeof(*bs));
 	if (!bs) return NULL;
 
+	bs->onpacket = onpacket;
+	bs->param = param;
+	bs->avs = stream;
+
 	// can be failure
 	assert(AVCODEC_VIDEO_H264 == codec);
 	n = mpeg4_h264_bitstream_format(extra, bytes);
@@ -67,9 +72,6 @@ static void* avpbs_h264_create(int stream, AVPACKET_CODEC_ID codec, const uint8_
 
 	if (bs->avc.nb_sps > 0 && bs->avc.nb_pps > 0)
 		avpbs_h264_create_stream(bs);
-	bs->onpacket = onpacket;
-	bs->param = param;
-	bs->avs = stream;
 	return bs;
 }
 
@@ -81,24 +83,25 @@ static int avpbs_h264_input(void* param, int64_t pts, int64_t dts, const uint8_t
 	
 	bs = (struct avpbs_h264_t*)param;
 	pkt = avpacket_alloc(bytes + H264_STARTCODE_PADDING);
-	if (!pkt) return -1;
+	if (!pkt) return -(__ERROR__ + ENOMEM);
 
-	pkt->size = h264_annexbtomp4(&bs->avc, nalu, bytes, pkt->data, pkt->size, &vcl, &update);
-	if (update && bs->avc.nb_sps > 0 && bs->avc.nb_pps > 0 && 0 != avpbs_h264_create_stream(bs))
+	r = h264_annexbtomp4(&bs->avc, nalu, bytes, pkt->data, pkt->size, &vcl, &update);
+	if (r < 1 || (update && bs->avc.nb_sps > 0 && bs->avc.nb_pps > 0 && 0 != avpbs_h264_create_stream(bs)))
 	{
 		avpacket_release(pkt);
-		return -1;
+		return r < 0 ? r : (-(__ERROR__ + E2BIG)); // h264 data process failed
 	}
 
 	if (!bs->stream)
 	{
 		avpacket_release(pkt);
-		return -1;
+		return 0; // discard
 	}
 
+	pkt->size = r;
 	pkt->pts = pts;
 	pkt->dts = dts;
-	pkt->flags = flags | (1 == vcl ? AVPACKET_FLAG_KEY : 0);
+	pkt->flags = (flags & (~AVPACKET_FLAG_KEY)) | (1 == vcl ? AVPACKET_FLAG_KEY : 0);
 	pkt->stream = bs->stream;
 	avstream_addref(bs->stream);
 
@@ -110,9 +113,9 @@ static int avpbs_h264_input(void* param, int64_t pts, int64_t dts, const uint8_t
 struct avpbs_t* avpbs_h264(void)
 {
 	static struct avpbs_t bs = {
-		.destroy = avpbs_h264_destroy,
-		.create = avpbs_h264_create,
-		.input = avpbs_h264_input,
+		avpbs_h264_create,
+		avpbs_h264_destroy,
+		avpbs_h264_input,
 	};
 	return &bs;
 }

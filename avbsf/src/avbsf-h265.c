@@ -1,9 +1,11 @@
 #include "avbsf.h"
 #include "cbuffer.h"
 #include "mpeg4-hevc.h"
+#include "avdtsinfer.h"
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#include <errno.h>
 
 #define H265_NAL_VPS		32
 #define H265_NAL_SPS		33
@@ -22,6 +24,7 @@ struct h265bsf_t
 	int vcl;
 	int64_t pts;
 	int64_t dts;
+	struct avdtsinfer_t infer;
 
 	uint8_t extra[4 * 1024];
 	int extra_bytes;
@@ -49,6 +52,7 @@ static void* h265bsf_create(const uint8_t* extra, int bytes, avbsf_onpacket onpa
 	bsf = calloc(1, sizeof(*bsf));
 	if (!bsf) return NULL;
 
+	avdtsinfer_reset(&bsf->infer);
 	cbuffer_init(&bsf->ptr);
 	bsf->vps_sps_pps_flag = 0;
 
@@ -77,8 +81,16 @@ static int h265bsf_input(void* param, int64_t pts, int64_t dts, const uint8_t* n
 	struct h265bsf_t* bsf;
 	bsf = (struct h265bsf_t*)param;
 
+	if (bytes > 3 && 0x00 == nalu[0] && 0x00 == nalu[1] && (0x01 == nalu[2] || (0x00 == nalu[2] && 0x01 == nalu[3])))
+	{
+		nalu += 0x01 == nalu[2] ? 3 : 4;
+		bytes -= 0x01 == nalu[2] ? 3 : 4;
+	}
+
 	if (bsf->vcl && (dts != bsf->dts || 0 == bytes || h265_is_new_access_unit(nalu, bytes)))
 	{
+		bsf->dts = avdtsinfer_update(&bsf->infer, 1 == bsf->vcl ? 1 : 0, bsf->pts, pts);
+
 		r = bsf->onpacket(bsf->param, bsf->pts, bsf->dts, bsf->ptr.ptr, (int)bsf->ptr.len, 1 == bsf->vcl ? 0x01 : 0);
 		bsf->ptr.len = 0;
 		bsf->vps_sps_pps_flag = 0;
@@ -120,21 +132,21 @@ static int h265bsf_input(void* param, int64_t pts, int64_t dts, const uint8_t* n
 
 	if (cbuffer_append(&bsf->ptr, startcode, sizeof(startcode)) <= 0
 		|| cbuffer_append(&bsf->ptr, nalu, bytes) <= 0)
-		return -1;
+		return -(__ERROR__ + ENOMEM);
 
 	bsf->pts = pts;
 	bsf->dts = dts;
 	if (nalt < H265_NAL_VPS)
-		bsf->vcl = 16 <= nalt && nalt <= 23 ? 1 : 2;
+		bsf->vcl = (16 <= nalt && nalt <= 23) ? 1 : 2;
 	return 0;
 }
 
 struct avbsf_t* avbsf_h265(void)
 {
 	static struct avbsf_t bsf = {
-		.create = h265bsf_create,
-		.destroy = h265bsf_destroy,
-		.input = h265bsf_input,
+		h265bsf_create,
+		h265bsf_destroy,
+		h265bsf_input,
 	};
 	return &bsf;
 }

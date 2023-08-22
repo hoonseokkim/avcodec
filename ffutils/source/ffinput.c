@@ -2,6 +2,7 @@
 #include <errno.h>
 #include <string.h>
 #include <assert.h>
+#include "libavcodec/bsf.h"
 #include "libavcodec/avcodec.h"
 #include "libavformat/avformat.h"
 #include "ffhelper.h"
@@ -34,7 +35,7 @@ static int ffinput_open(struct ffinput_t* ff, const char* url)
 	if (NULL == ff->ic)
 	{
 		printf("%s(%s): avformat_alloc_context failed.\n", __FUNCTION__, url);
-		return ENOMEM;
+		return -ENOMEM;
 	}
 
 	//if (!av_dict_get(ff->opt, "scan_all_pmts", NULL, AV_DICT_MATCH_CASE)) {
@@ -46,7 +47,7 @@ static int ffinput_open(struct ffinput_t* ff, const char* url)
 	r = avformat_open_input(&ff->ic, url, NULL, &opt);
 	if (0 != r)
 	{
-		printf("%s: avformat_open_input(%s) => %d\n", __FUNCTION__, url, r);
+		printf("%s: avformat_open_input(%s) => %s\n", __FUNCTION__, url, av_err2str(r));
 		return r;
 	}
 
@@ -60,7 +61,7 @@ static int ffinput_open(struct ffinput_t* ff, const char* url)
 	first frames to get it. (used in mpeg case for example) */
 	r = avformat_find_stream_info(ff->ic, NULL/*&opt*/);
 	if (r < 0) {
-		printf("%s(%s): could not find codec parameters\n", __FUNCTION__, url);
+		printf("%s(%s): could not find codec parameters: %s\n", __FUNCTION__, url, av_err2str(r));
 		return r;
 	}
 

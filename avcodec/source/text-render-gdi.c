@@ -1,10 +1,11 @@
 #include "text-render.h"
+#if defined(OS_WINDOWS)
 #include <Windows.h>
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
 
-#define BYTES 4
+#define BYTES 3
 #define ALIGN(a, n) (((a) + (n) - 1) / (n) * (n))
 
 struct gdi_context_t
@@ -45,6 +46,7 @@ static void text_render_destroy(void* p)
 
 	if (render->hDC)
 	{
+		ReleaseDC(NULL, render->hDC);
 		DeleteDC(render->hDC);
 		render->hDC = NULL;
 	}
@@ -105,7 +107,7 @@ static int text_render_bitmap(struct gdi_context_t* render, HBITMAP hBitmap)
 
 	p = realloc(render->bitmap, bmp.bmHeight * bmp.bmWidth * BYTES);
 	if (!p)
-		return ENOMEM;
+		return -ENOMEM;
 
 	render->bitmap = p;
 	GetDIBits(render->hDC, hBitmap, 0, bmp.bmHeight, p, (BITMAPINFO*)&bi, DIB_RGB_COLORS);
@@ -147,7 +149,8 @@ static int text_render_getsize(struct gdi_context_t* render, const wchar_t* txt)
 
 static const void* text_render_draw(void* p, const wchar_t* txt, int *w, int *h, int* pitch)
 {
-	HBITMAP hBitmap;
+	HDC hdc;
+	HBITMAP hBitmap, old;
 	struct gdi_context_t* render = (struct gdi_context_t*)p;
 
 	if (render->hFont)
@@ -156,13 +159,16 @@ static const void* text_render_draw(void* p, const wchar_t* txt, int *w, int *h,
 	if (0 != text_render_getsize(render, txt))
 		return NULL;
 
-	hBitmap = CreateCompatibleBitmap(render->hDC, render->pitch, render->height);
-	SelectObject(render->hDC, hBitmap);
+	hdc = GetDC(NULL);
+	hBitmap = CreateCompatibleBitmap(hdc, render->pitch, render->height);
+	old = SelectObject(render->hDC, hBitmap);
 
 	text_render_draw_text(render, txt);
 	text_render_bitmap(render, hBitmap);
 
+	SelectObject(render->hDC, old);
 	DeleteObject(hBitmap);
+	ReleaseDC(NULL, hdc);
 
 	*w = render->pitch;
 	*h = render->height;
@@ -180,3 +186,5 @@ struct text_render_t* text_render_gdi()
 	};
 	return &render;
 }
+
+#endif /* OS_WINDOWS */
